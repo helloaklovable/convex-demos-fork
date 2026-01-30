@@ -191,3 +191,118 @@ rm -rf /tmp/convex-backend
 This uses `--depth 1` (single commit) and `--filter=blob:none` with sparse
 checkout so only the docs subtree is fetched — not the entire convex-backend
 repo.
+
+---
+
+## Inline `convex-helpers` Library (`convex-helpers/`)
+
+The `convex-helpers/` directory contains a full copy of the
+[convex-helpers](https://github.com/get-convex/convex-helpers) repository — the
+community-standard utility library for Convex. This gives Claude Code direct
+access to every helper's source, documentation, and usage examples without
+needing to fetch from npm or GitHub at runtime.
+
+### Directory map
+
+The library source lives in `convex-helpers/packages/convex-helpers/`. The
+detailed README with full usage docs is at
+`convex-helpers/packages/convex-helpers/README.md`.
+
+#### Server helpers (`convex-helpers/packages/convex-helpers/server/`)
+
+| File | What it does |
+|------|-------------|
+| `customFunctions.ts` | Build custom `query`/`mutation`/`action` builders with auth, middleware, ctx extensions |
+| `relationships.ts` | Relationship helpers: many-to-many, one-to-many traversal |
+| `migrations.ts` | Stateful data migrations that run incrementally |
+| `retries.ts` | Action retry wrapper with exponential backoff |
+| `rateLimit.ts` | Rate limiting (token bucket and fixed window) |
+| `sessions.ts` | Server-side session tracking via client-generated session IDs |
+| `rowLevelSecurity.ts` | Row-level security (RLS) — wrap `db` with access rules |
+| `zod.ts` | Zod validation for Convex function args (Zod 3 legacy) |
+| `zod3.ts` | Zod 3 validation support |
+| `zod4.ts` | Zod 4 (Mini) validation support |
+| `hono.ts` | Hono framework integration for HTTP endpoints |
+| `crud.ts` | Auto-generate CRUD functions for a table |
+| `filter.ts` | Filter database queries with arbitrary JS predicates |
+| `pagination.ts` | Manual pagination and `paginator` helper |
+| `stream.ts` | Composable `QueryStream`s — merge, join, filter across indexes |
+| `triggers.ts` | Database triggers — run logic on document create/update/delete |
+| `cors.ts` | CORS support for `HttpRouter` |
+| `compare.ts` | Deep comparison utilities for Convex values |
+
+#### Client/React helpers
+
+| File | What it does |
+|------|-------------|
+| `packages/convex-helpers/react/cache/` | `ConvexQueryCacheProvider` — client-side query caching |
+| `packages/convex-helpers/react/sessions.ts` | React hooks for session tracking (`useSessionQuery`, etc.) |
+| `packages/convex-helpers/react.ts` | Re-export entry point for React helpers |
+
+#### Top-level modules
+
+| File | What it does |
+|------|-------------|
+| `packages/convex-helpers/index.ts` | Core utilities (e.g. `pruneNull`, `asyncMap`, `getOrThrow`) |
+| `packages/convex-helpers/validators.ts` | Validator utilities (`partial`, `pick`, `omit`, `deprecated`, `brandedString`, `literals`, etc.) |
+| `packages/convex-helpers/standardSchema.ts` | Standard Schema adapter for Convex validators |
+| `packages/convex-helpers/testing.ts` | Testing utilities for local backend tests |
+| `packages/convex-helpers/browser.ts` | Browser-safe utilities |
+
+#### CLI tools
+
+| File | What it does |
+|------|-------------|
+| `packages/convex-helpers/cli/tsApiSpec.ts` | TypeScript API type generation |
+| `packages/convex-helpers/cli/openApiSpec.ts` | OpenAPI spec generation from Convex functions |
+
+#### Usage examples (`convex-helpers/convex/`)
+
+| File | Demonstrates |
+|------|-------------|
+| `schema.ts` | Schema used by all examples |
+| `rlsExample.ts` | Row-level security setup |
+| `zodFunctionsExample.ts` | Zod-validated Convex functions |
+| `migrationsExample.ts` | Stateful migrations |
+| `relationshipsExample.ts` | Relationship traversal helpers |
+| `retriesExample.ts` | Action retries |
+| `sessionsExample.ts` | Session tracking |
+| `triggersExample.ts` | Database triggers |
+| `streamsExample.ts` | Composable query streams |
+| `presence.ts` | Presence tracking functions |
+| `http.ts` | HTTP endpoint with Hono + CORS |
+
+#### Client-side hooks (`convex-helpers/src/hooks/`)
+
+| File | What it does |
+|------|-------------|
+| `usePresence.ts` | Presence tracking React hook |
+| `useTypingIndicator.ts` | Typing indicator built on presence |
+| `useSingleFlight.ts` | Throttle client requests by single-flighting |
+| `useStableQuery.ts` | Return stale results during parameter changes |
+| `useLatestValue.ts` | Always-current value ref utility |
+
+### How this copy was created
+
+A shallow clone of the full repo (commit `22df7f7`):
+
+```sh
+git clone --depth 1 https://github.com/get-convex/convex-helpers.git /tmp/convex-helpers
+cp -r /tmp/convex-helpers convex-helpers
+rm -rf convex-helpers/.git convex-helpers/.github convex-helpers/package-lock.json
+rm -rf /tmp/convex-helpers
+```
+
+### Updating to the latest version
+
+Re-run the same commands to replace `convex-helpers/` with the latest upstream:
+
+```sh
+rm -rf convex-helpers
+git clone --depth 1 https://github.com/get-convex/convex-helpers.git /tmp/convex-helpers
+cp -r /tmp/convex-helpers convex-helpers
+rm -rf convex-helpers/.git convex-helpers/.github convex-helpers/package-lock.json
+rm -rf /tmp/convex-helpers
+```
+
+This clones only the latest commit (`--depth 1`) so the fetch is fast.
