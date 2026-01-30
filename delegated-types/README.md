@@ -3,9 +3,11 @@
 A Convex demo implementing the **delegated type** pattern from Ruby on Rails, as
 pioneered by Basecamp for modeling content across Basecamp and HEY.
 
-The demo models a simplified content management system — projects containing
-messages, comments, and documents — where all content shares uniform metadata
-and operations while each type retains its own specific attributes.
+The demo models a simplified content management system where all content shares
+uniform metadata and operations while each type retains its own specific
+attributes. The killer feature: **immutable recordables with version history** —
+editing creates a new version, the old version is never touched, and the full
+change log falls out naturally.
 
 ---
 
@@ -174,10 +176,10 @@ recordings (superclass — shared metadata only)
 ├── created_at
 └── updated_at
 
-messages (recordable — type-specific content)    comments       documents
-├── id                                           ├── id          ├── id
-├── subject                                      └── content     ├── title
-└── body                                                         └── body
+messages (recordable — type-specific)    comments       documents
+├── id                                   ├── id          ├── id
+├── subject                              └── content     ├── title
+└── body                                                 └── body
 ```
 
 The `recordings` table holds shared metadata plus a type/id pair. Each concrete
@@ -221,13 +223,25 @@ Basecamp layers additional patterns on top of the Rails primitive:
 - **Tree structure**: recordings form parent-child hierarchies. A message
   board's children are messages; a message's children are comments. Navigation
   always goes through recordings.
-- **Immutable recordables**: editing creates a new recordable and updates the
-  recording's pointer. The old version still exists.
+- **Immutable recordables**: recordables are never modified in place. Editing
+  creates a new recordable and updates the recording's pointer. The old version
+  still exists in the database, untouched.
 - **Event history**: an events table logs which recordable a recording pointed
-  to at each moment, enabling version history and change logs.
+  to at each moment, enabling version history and change logs. As Jeff Hardy
+  explains: "we can look at the history of a recording and see all of its
+  changes and look at that recordable that is immutable at any moment in time
+  to see how it looked."
+- **Cheap copies**: copying a recording means creating a new recording row that
+  points to the same recordable. No content is duplicated. If a message gets
+  copied 100 times, there is still only one message recordable.
 - **Capabilities**: each type declares what it supports (commentable,
   subscribable, exportable) via boolean methods. Generic controllers check
   these before acting.
+
+This demo implements the core delegated type pattern plus immutable recordables,
+event history, and cheap copies — the combination that Jeffrey Hardy calls the
+reason "you can build entirely new features that should take months in like a
+week, two weeks."
 
 ---
 
@@ -243,28 +257,27 @@ differences are in how the two platforms express behavior and relationships.
 | Rails Concept | Convex Equivalent |
 |---|---|
 | `recordings` SQL table | `recordings` Convex table |
-| `recordable_type` column (string) | `type` field with `v.union(v.literal("message"), ...)` |
+| `recordable_type` column (string) | `recordableType` field with `v.union(v.literal("message"), ...)` |
 | `recordable_id` column (integer FK) | `recordableId` field with `v.union(v.id("messages"), ...)` |
 | `messages` SQL table | `messages` Convex table |
 | `belongs_to :bucket` | `projectId: v.id("projects")` |
-| `parent_id` (self-referential FK) | `parentId: v.optional(v.id("recordings"))` |
 | `creator_id` FK | `creatorId: v.id("users")` |
-| `created_at` / `updated_at` | `_creationTime` (automatic) + `updatedAt` field if needed |
+| `events` SQL table | `events` Convex table |
+| `created_at` / `updated_at` | `_creationTime` (automatic) |
 
 ### Behavior Mapping
 
 | Rails Concept | Convex Equivalent |
 |---|---|
 | `delegated_type :recordable, types: [...]` | Schema definition with `v.union()` of `v.literal()` types |
-| `Recording.messages` (scope) | Indexed query: `.withIndex("by_type", q => q.eq("type", "message"))` |
-| `recording.message?` (type check) | `recording.type === "message"` (TypeScript narrowing) |
+| `Recording.messages` (scope) | Indexed query: `.withIndex("by_project_and_type", q => q.eq(...).eq("recordableType", "message"))` |
+| `recording.message?` (type check) | `recording.recordableType === "message"` (TypeScript narrowing) |
 | `recording.recordable` (fetch delegate) | `ctx.db.get(recording.recordableId)` (ID encodes the table) |
 | `recording.message` (typed fetch) | Helper function with type guard + `ctx.db.get()` |
-| `delegates :title, to: :recordable` | Helper function that dispatches based on `recording.type` |
-| `Recordable` concern (shared module) | TypeScript helper functions and shared type definitions |
-| `def commentable? = true` (capability) | Capability map: `{ message: { commentable: true, ... }, ... }` |
+| Immutable recordables (create new, update pointer) | `insertRecordable` helper that only inserts, never patches |
+| Event logging (after_commit callbacks) | Explicit event insert inside the mutation — no hidden callbacks |
+| `Recording::Copier` (copy without duplicating content) | `copy` mutation: new recording row, same `recordableId` |
 | ActiveRecord callbacks | Logic in mutation handlers (explicit, not implicit) |
-| Controller actions | Convex query and mutation functions |
 | Russian doll caching | Convex reactive queries (automatic, no manual invalidation) |
 
 ### What Changes, What Stays the Same
@@ -274,7 +287,8 @@ differences are in how the two platforms express behavior and relationships.
   type/id reference pair.
 - The principle that recordings are the unit of organization and querying.
 - The principle that recordables are dumb content with no external references.
-- The tree structure via self-referential parent IDs.
+- Immutability of recordables — editing means creating, never modifying.
+- Event history as the mechanism for version tracking.
 - The benefit of uniform operations across types.
 
 **Changes:**
@@ -286,18 +300,19 @@ differences are in how the two platforms express behavior and relationships.
   (`recordable_type` maps to class names). Convex uses TypeScript's type system
   — `v.literal("message")` is checked at compile time and validated at runtime.
 - **Transactions are built in.** In Rails, creating a recording and its
-  recordable together requires care (callbacks, service objects, or
-  `accepts_nested_attributes_for`). In Convex, a mutation is automatically
-  atomic — insert the recordable, insert the recording, and both either succeed
-  or neither does.
+  recordable together requires an explicit `transaction` block (see Basecamp's
+  `Bucket::Recorder#record`). In Convex, every mutation is automatically
+  atomic — insert the recordable, insert the recording, log the event, and all
+  three either succeed or none do.
 - **Reactivity replaces caching.** Rails uses cache keys and Russian doll
   caching to avoid re-rendering. Convex queries are reactive subscriptions —
   when data changes, subscribed components re-render with fresh data. There is
   no cache to invalidate.
-- **Joins are explicit.** Rails loads associations lazily or eagerly
-  (`includes`, `preload`). In Convex, you follow references with
-  `ctx.db.get(id)` explicitly in your query handler. This makes the data
-  access pattern visible rather than hidden behind association proxies.
+- **Append-only is structural, not conventional.** In Rails, the immutability
+  of recordables is a team convention enforced by code review. In Convex, we
+  enforce it by design: a single `insertRecordable` helper is the only write
+  path to recordable tables, and it only inserts. There are no exported
+  functions that patch or delete recordable content.
 
 ---
 
@@ -305,27 +320,13 @@ differences are in how the two platforms express behavior and relationships.
 
 ### Schema Design
 
-The schema has six tables organized in two groups:
+The schema has seven tables organized in three groups:
 
-**Superclass and containers:**
+**Containers and users:**
 
 ```typescript
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-
-// The set of recordable type names — defined once, used everywhere.
-const recordableType = v.union(
-  v.literal("message"),
-  v.literal("comment"),
-  v.literal("document"),
-);
-
-// All possible recordable IDs — one per type table.
-const recordableId = v.union(
-  v.id("messages"),
-  v.id("comments"),
-  v.id("documents"),
-);
 
 export default defineSchema({
   users: defineTable({
@@ -335,19 +336,22 @@ export default defineSchema({
   projects: defineTable({
     name: v.string(),
   }),
+```
 
+**Superclass table — the spine:**
+
+```typescript
   recordings: defineTable({
-    type: recordableType,
+    recordableType: recordableType,
     recordableId: recordableId,
     projectId: v.id("projects"),
     creatorId: v.id("users"),
-    parentId: v.optional(v.id("recordings")),
   })
-    .index("by_project_and_type", ["projectId", "type"])
-    .index("by_parent", ["parentId"]),
+    .index("by_project", ["projectId"])
+    .index("by_project_and_type", ["projectId", "recordableType"]),
 ```
 
-**Recordable tables (type-specific content):**
+**Recordable tables — append-only content:**
 
 ```typescript
   messages: defineTable({
@@ -363,7 +367,37 @@ export default defineSchema({
     title: v.string(),
     body: v.string(),
   }),
+```
+
+**Event history — tracks every version:**
+
+```typescript
+  events: defineTable({
+    recordingId: v.id("recordings"),
+    recordableId: recordableId,
+    creatorId: v.id("users"),
+    action: v.union(v.literal("created"), v.literal("updated"), v.literal("copied")),
+  }).index("by_recording", ["recordingId"]),
 });
+```
+
+The shared validators are defined once and reused across the schema and all
+function files:
+
+```typescript
+// The set of recordable type names — defined once, used everywhere.
+const recordableType = v.union(
+  v.literal("message"),
+  v.literal("comment"),
+  v.literal("document"),
+);
+
+// All possible recordable IDs — one per type table.
+const recordableId = v.union(
+  v.id("messages"),
+  v.id("comments"),
+  v.id("documents"),
+);
 ```
 
 ### Design Principles
@@ -371,110 +405,229 @@ export default defineSchema({
 **1. The recordings table is the spine.**
 
 Every query starts with recordings. Want all content in a project? Query
-`recordings` by `projectId`. Want only messages? Add a type filter. Want a
-specific item and all its children? Look up the recording, then query by
-`parentId`. The recordable tables are never queried directly — they're
-reached by following `recordableId` from a recording.
+`recordings` by `projectId`. Want only messages? Filter on `recordableType`.
+The recordable tables are never queried directly — they're reached by following
+`recordableId` from a recording.
 
-**2. Recordables are inert.**
+**2. Recordables are inert and immutable.**
 
 A recordable has no foreign keys, no timestamps, no references to recordings
-or projects or users. It is purely a bag of content-specific fields. This is
-what makes copying a recording cheap (point a new recording at the same
-recordable) and what keeps the content tables small and independent.
+or projects or users. It is purely a bag of content-specific fields. As Jeff
+Hardy puts it: "You got to think of the recordables as being pretty dumb.
+They're just like, in the case of a message, it's literally just a title and
+content. That's it. They have no connection to the outside world."
 
-**3. Type safety at the schema boundary.**
+Recordables are never modified after creation. To edit content, you create a
+new recordable and update the recording's pointer. The old recordable stays in
+the database, untouched — available for version history, diffing, and rollback.
 
-The `type` field uses `v.union(v.literal(...))` — Convex validates it at
-runtime and TypeScript checks it at compile time. The `recordableId` field
-uses `v.union(v.id(...))` — each variant is typed to a specific table. The
-pairing of type + recordableId is enforced by mutation logic: you never set
-them independently.
+**3. Append-only is enforced by the write path.**
 
-**4. Mutations are the consistency boundary.**
+All writes to recordable tables go through a single `insertRecordable` helper
+function. This helper only calls `ctx.db.insert()` — it has no capability to
+patch or delete. There are no exported mutations for the `messages`, `comments`,
+or `documents` tables. No function file exists for these tables at all. The
+only way to get content into a recordable table is through `recordings.ts`,
+and it can only append.
 
-Creating a recording means inserting a recordable and a recording in the same
-mutation. Because Convex mutations are transactional, there is no window where
-a recording exists without its recordable, or vice versa. This replaces Rails'
-reliance on callbacks and `dependent: :destroy`.
+**4. Events are the change log.**
 
-**5. Explicit data access.**
+Every write that touches a recording's pointer — creating, editing, or
+copying — also inserts an event. The events table records which recordable a
+recording pointed to at each moment and who made the change. This is the same
+pattern Basecamp uses for its document change history and "see what changed"
+feature.
 
-There is no lazy loading or association proxy. When a query handler needs the
-recordable content, it calls `ctx.db.get(recording.recordableId)`. When it
-needs the parent recording, it calls `ctx.db.get(recording.parentId)`. Every
-database read is visible in the code.
+**5. Mutations are the consistency boundary.**
 
-### Key Design Decision: Flat Fields vs. Document-Level Union
+Creating a recording means inserting a recordable, a recording, and an event
+in the same mutation. Because Convex mutations are transactional, there is no
+window where a recording exists without its recordable, or an edit happens
+without a corresponding event. This replaces Rails' reliance on callbacks and
+`transaction` blocks.
 
-There are two ways to represent the type/id pair in Convex's schema.
+**6. Type safety at the schema boundary.**
 
-**This demo uses flat fields** — `type` and `recordableId` as separate
-top-level fields:
-
-```typescript
-recordings: defineTable({
-  type: v.union(v.literal("message"), v.literal("comment"), ...),
-  recordableId: v.union(v.id("messages"), v.id("comments"), ...),
-  projectId: v.id("projects"),
-  // ...
-})
-```
-
-The alternative is a **document-level discriminated union**, where the entire
-document is a union of objects:
-
-```typescript
-recordings: defineTable(
-  v.union(
-    v.object({
-      type: v.literal("message"),
-      recordableId: v.id("messages"),
-      projectId: v.id("projects"),
-      creatorId: v.id("users"),
-      parentId: v.optional(v.id("recordings")),
-    }),
-    v.object({
-      type: v.literal("comment"),
-      recordableId: v.id("comments"),
-      // ... same shared fields repeated for each variant
-    }),
-    // ...
-  )
-)
-```
-
-The document-level union gives **full TypeScript narrowing**: after checking
-`recording.type === "message"`, TypeScript knows `recordableId` is
-`Id<"messages">`. The flat approach doesn't — TypeScript sees `recordableId`
-as the full union regardless of the `type` check.
-
-We chose flat fields because:
-- The schema is shorter and easier to read.
-- Shared fields aren't repeated for each variant (the core point of the pattern
-  is that metadata is shared, not duplicated).
-- Indexing works straightforwardly on flat fields.
-- The type/id consistency is enforced by mutations, which always set them
-  together — the same way Rails enforces it (no database constraint ties
-  `recordable_type` to `recordable_id` in Rails either).
-- A small helper function bridges the narrowing gap where needed.
+The `recordableType` field uses `v.union(v.literal(...))` — Convex validates
+it at runtime and TypeScript checks it at compile time. The `recordableId`
+field uses `v.union(v.id(...))` — each variant is typed to a specific table.
+The pairing of type + ID is enforced by the `insertRecordable` helper, which
+maps each type to its correct table and content shape.
 
 ### Function Organization
 
-Functions are grouped by what they operate on:
-
 | File | Responsibility |
 |---|---|
-| `convex/recordings.ts` | All recording operations — create, list, get (with recordable), get children, trash/restore. This is the main API surface; everything goes through recordings. |
+| `convex/recordings.ts` | All recording operations — record, edit, copy, list, get with history. The single entry point for all content. |
 | `convex/projects.ts` | Project CRUD. Projects are the "buckets" — containers that hold recordings. |
 | `convex/users.ts` | User lookup. Minimal — just enough to populate `creatorId`. |
-| `convex/schema.ts` | Schema definition and shared validator constants. |
+| `convex/schema.ts` | Schema definition and shared validator constants (`recordableType`, `recordableId`). |
 
 There are no `messages.ts`, `comments.ts`, or `documents.ts` function files.
-This is intentional — recordables are not accessed directly. They are always
-reached through recordings. If a recordable type needed special behavior on
-creation, that logic would live in `recordings.ts` as a branch within the
-create mutation, keeping the single entry point.
+This is intentional and structural — it means no code path exists that could
+accidentally modify or delete a recordable. All content enters the system
+through `recordings.ts`, which only appends to recordable tables.
+
+### The Append-Only Write Path
+
+The `insertRecordable` helper is the sole function that writes to recordable
+tables. It maps each type to its table and content shape, and it only inserts:
+
+```typescript
+// Table name for each recordable type.
+const RECORDABLE_TABLES = {
+  message: "messages",
+  comment: "comments",
+  document: "documents",
+} as const;
+
+// The only write path to recordable tables. Insert-only — no patch, no delete.
+async function insertRecordable(
+  ctx: MutationCtx,
+  recordableType: "message" | "comment" | "document",
+  content: MessageContent | CommentContent | DocumentContent,
+) {
+  const table = RECORDABLE_TABLES[recordableType];
+  return ctx.db.insert(table, content);
+}
+```
+
+Every mutation in `recordings.ts` that needs to write content calls this
+helper. The helper is not exported — it's a private function inside the module.
+This is the Convex equivalent of Basecamp's discipline around recordable
+immutability, but enforced structurally rather than by convention.
+
+### Mutation Patterns
+
+**Record: create a recording with its recordable.**
+
+This is the Convex equivalent of Basecamp's `bucket.record(recordable, ...)`:
+
+```typescript
+export const record = mutation({
+  args: {
+    recordableType: recordableType,
+    content: v.union(
+      v.object({ subject: v.string(), body: v.string() }),  // message
+      v.object({ content: v.string() }),                     // comment
+      v.object({ title: v.string(), body: v.string() }),     // document
+    ),
+    projectId: v.id("projects"),
+    creatorId: v.id("users"),
+  },
+  handler: async (ctx, { recordableType, content, projectId, creatorId }) => {
+    // 1. Insert the recordable (append-only)
+    const recordableId = await insertRecordable(ctx, recordableType, content);
+
+    // 2. Insert the recording that references it
+    const recordingId = await ctx.db.insert("recordings", {
+      recordableType,
+      recordableId,
+      projectId,
+      creatorId,
+    });
+
+    // 3. Log the creation event
+    await ctx.db.insert("events", {
+      recordingId,
+      recordableId,
+      creatorId,
+      action: "created",
+    });
+
+    return recordingId;
+  },
+});
+```
+
+All three inserts happen in the same mutation — transactionally atomic. The
+recordable is created first (to get its ID), then the recording, then the
+event. If any step fails, all roll back.
+
+**Edit: create a new version without touching the old one.**
+
+This is the heart of the immutable recordables pattern. Editing never modifies
+existing content — it creates a new recordable and swings the recording's
+pointer:
+
+```typescript
+export const edit = mutation({
+  args: {
+    recordingId: v.id("recordings"),
+    content: v.union(
+      v.object({ subject: v.string(), body: v.string() }),
+      v.object({ content: v.string() }),
+      v.object({ title: v.string(), body: v.string() }),
+    ),
+    creatorId: v.id("users"),
+  },
+  handler: async (ctx, { recordingId, content, creatorId }) => {
+    const recording = await ctx.db.get(recordingId);
+
+    // 1. Insert a NEW recordable — the old one is untouched
+    const newRecordableId = await insertRecordable(
+      ctx, recording.recordableType, content
+    );
+
+    // 2. Swing the recording's pointer to the new version
+    await ctx.db.patch(recordingId, { recordableId: newRecordableId });
+
+    // 3. Log the edit event
+    await ctx.db.insert("events", {
+      recordingId,
+      recordableId: newRecordableId,
+      creatorId,
+      action: "updated",
+    });
+  },
+});
+```
+
+After this mutation, the recording points to the new content. The old
+recordable still exists in the database — reachable through the events table.
+This is exactly how Basecamp's document change log works: each event captures
+a snapshot of the content at that moment in time.
+
+**Copy: the cheap copy pattern.**
+
+Copying creates a new recording that points to the same recordable. No content
+is duplicated:
+
+```typescript
+export const copy = mutation({
+  args: {
+    recordingId: v.id("recordings"),
+    destinationProjectId: v.id("projects"),
+    creatorId: v.id("users"),
+  },
+  handler: async (ctx, { recordingId, destinationProjectId, creatorId }) => {
+    const source = await ctx.db.get(recordingId);
+
+    // New recording, SAME recordable — zero content duplication
+    const newRecordingId = await ctx.db.insert("recordings", {
+      recordableType: source.recordableType,
+      recordableId: source.recordableId,
+      projectId: destinationProjectId,
+      creatorId,
+    });
+
+    await ctx.db.insert("events", {
+      recordingId: newRecordingId,
+      recordableId: source.recordableId,
+      creatorId,
+      action: "copied",
+    });
+
+    return newRecordingId;
+  },
+});
+```
+
+This is the efficiency Jeff Hardy highlights: "instead of actually copying the
+content of a message, we just create a new recording row and point to the same
+message recordable that already exists. We don't need to copy it at all, and
+it's super fast and storage efficient." If a message gets copied 100 times,
+there is still only one message recordable in the database.
 
 ### Query Patterns
 
@@ -484,19 +637,18 @@ create mutation, keeping the single entry point.
 export const list = query({
   args: {
     projectId: v.id("projects"),
-    type: v.optional(recordableType),
+    recordableType: v.optional(recordableType),
   },
-  handler: async (ctx, { projectId, type }) => {
-    let q = ctx.db
+  handler: async (ctx, { projectId, recordableType }) => {
+    const recordings = await ctx.db
       .query("recordings")
       .withIndex("by_project_and_type", (q) =>
-        type
-          ? q.eq("projectId", projectId).eq("type", type)
+        recordableType
+          ? q.eq("projectId", projectId).eq("recordableType", recordableType)
           : q.eq("projectId", projectId)
-      );
-    const recordings = await q.collect();
+      )
+      .collect();
 
-    // Fetch each recording's recordable content
     return Promise.all(
       recordings.map(async (recording) => ({
         ...recording,
@@ -509,116 +661,105 @@ export const list = query({
 
 This is the Convex equivalent of `bucket.recordings.messages` — a single
 indexed query on the `recordings` table, then a fan-out to fetch each
-recordable. The fan-out is explicit (no hidden N+1 — it's deliberate and
-visible).
+recordable. The fan-out is explicit and deliberate.
 
-**Get children of a recording:**
+**Get a recording with its full version history:**
 
 ```typescript
-export const children = query({
+export const getWithHistory = query({
   args: { recordingId: v.id("recordings") },
   handler: async (ctx, { recordingId }) => {
-    const kids = await ctx.db
-      .query("recordings")
-      .withIndex("by_parent", (q) => q.eq("parentId", recordingId))
+    const recording = await ctx.db.get(recordingId);
+    const recordable = await ctx.db.get(recording.recordableId);
+
+    // Fetch all events for this recording — each one references
+    // the recordable that was current at that moment
+    const events = await ctx.db
+      .query("events")
+      .withIndex("by_recording", (q) => q.eq("recordingId", recordingId))
       .collect();
-    return Promise.all(
-      kids.map(async (r) => ({
-        ...r,
-        recordable: await ctx.db.get(r.recordableId),
+
+    const history = await Promise.all(
+      events.map(async (event) => ({
+        ...event,
+        recordable: await ctx.db.get(event.recordableId),
       }))
     );
+
+    return { recording, recordable, history };
   },
 });
 ```
 
-Tree traversal goes through the `recordings` table, never through recordable
-tables directly.
+Each event in the history carries a reference to the recordable that was
+current at that point. Because recordables are immutable, every version is
+still exactly as it was when created — there is no risk of a historical
+version being accidentally modified. This is how Basecamp implements "see what
+changed" and "make this the current version."
 
-### Mutation Patterns
+### Rollback: Make a Previous Version Current
 
-**Create a recording with its recordable:**
-
-```typescript
-export const create = mutation({
-  args: {
-    type: recordableType,
-    content: v.union(
-      v.object({ subject: v.string(), body: v.string() }),     // message
-      v.object({ content: v.string() }),                        // comment
-      v.object({ title: v.string(), body: v.string() }),        // document
-    ),
-    projectId: v.id("projects"),
-    creatorId: v.id("users"),
-    parentId: v.optional(v.id("recordings")),
-  },
-  handler: async (ctx, { type, content, projectId, creatorId, parentId }) => {
-    // Insert the recordable into its type-specific table
-    const recordableId = await ctx.db.insert(type + "s", content);
-
-    // Insert the recording that references it
-    return ctx.db.insert("recordings", {
-      type,
-      recordableId,
-      projectId,
-      creatorId,
-      parentId,
-    });
-  },
-});
-```
-
-Both inserts happen in the same mutation — transactionally atomic. The
-recordable is created first (to get its ID), then the recording is created
-with the reference. This is the Convex equivalent of
-`Recording.create!(recordable: Message.new(...))`.
-
-**Copy a recording (the cheap copy pattern):**
+Because every old recordable still exists, rollback is a pointer swap:
 
 ```typescript
-export const copy = mutation({
+export const rollback = mutation({
   args: {
     recordingId: v.id("recordings"),
-    destinationProjectId: v.id("projects"),
-    destinationParentId: v.optional(v.id("recordings")),
+    eventId: v.id("events"),
+    creatorId: v.id("users"),
   },
-  handler: async (ctx, { recordingId, destinationProjectId, destinationParentId }) => {
-    const source = await ctx.db.get(recordingId);
+  handler: async (ctx, { recordingId, eventId, creatorId }) => {
+    const event = await ctx.db.get(eventId);
 
-    // Create a new recording pointing to the SAME recordable — no content duplication
-    return ctx.db.insert("recordings", {
-      type: source.type,
-      recordableId: source.recordableId,
-      projectId: destinationProjectId,
-      creatorId: source.creatorId,
-      parentId: destinationParentId,
+    // Point the recording back to the old recordable
+    await ctx.db.patch(recordingId, { recordableId: event.recordableId });
+
+    // Log the rollback as a new event
+    await ctx.db.insert("events", {
+      recordingId,
+      recordableId: event.recordableId,
+      creatorId,
+      action: "updated",
     });
   },
 });
 ```
 
-This is the key efficiency: copying creates one new row in `recordings` and
-zero new rows in any content table. The recordable is shared by reference.
+No content is recreated. The old recordable is already there. We just swing the
+pointer back. As Jeff Hardy describes it: "When you click [make this the
+current version], all we're going to do is update the recording record to point
+to this version of the document instead of the current version."
 
-### What This Demo Includes vs. Omits
+---
 
-**Included** (core delegated type pattern):
-- Superclass table with type/id delegation to separate content tables
-- Projects as containers (the "bucket" concept)
-- Tree structure (parent/child recordings)
-- Uniform operations through recordings (create, list, copy)
-- Cross-type querying with a single indexed query
-- Type-safe schema with Convex validators
+## Why This Pattern Works in Convex
 
-**Omitted** (Basecamp extensions — interesting but not essential to the
-pattern):
-- Immutable recordables and version history (would add an `events` table
-  tracking recordable pointer changes over time)
-- Capability declaration (would add a config map: `{ message: { commentable:
-  true } }`)
-- Trash/archive lifecycle (would add a `status` field to recordings)
-- Full-text search across recordings (would add a `searchIndex` to recordings
-  with a denormalized title field)
+The delegated type pattern is a natural fit for Convex for a few reasons that
+go beyond "you can express the same schema":
 
-These extensions compose well with the base pattern and could be layered on
-incrementally.
+**Transactional mutations replace callbacks.** In Rails, creating a recording
+with its recordable and event requires a `transaction` block, careful callback
+ordering, and service objects like `Bucket::Recorder`. In Convex, a single
+mutation is already atomic. The `record` mutation inserts three documents and
+they either all succeed or none do. No ceremony required.
+
+**Reactive queries replace cache invalidation.** In Basecamp, the Russian doll
+caching pattern (`cache(recording) do...end`) is essential for performance.
+In Convex, queries are reactive subscriptions. When a recording's pointer
+swings to a new recordable, every component subscribed to that recording
+re-renders with the new content. There is no cache key to compute, no cache to
+expire, no stale data.
+
+**Append-only is enforceable, not just conventional.** In Rails, the
+immutability of recordables is a team discipline. Nothing in Active Record
+prevents `message.update!(body: "oops")`. In Convex, the `insertRecordable`
+helper is the only write path to content tables, and it only inserts. There
+are no function files for recordable tables and no exported mutations that
+could patch or delete content. The constraint is structural.
+
+**Typed IDs make `ctx.db.get()` table-aware.** In Rails, `recordable_id` is an
+integer and `recordable_type` is a string — the ORM uses both to locate the
+record. In Convex, the table is encoded in the ID itself.
+`ctx.db.get(recording.recordableId)` returns a document from the correct table
+without needing a separate type column lookup. The `recordableType` field
+exists for filtering and display, not for resolution.
