@@ -122,3 +122,72 @@ npm run dev   # runs convex dev + vite dev in parallel
 The `dev` script uses `npm-run-all --parallel` to start both the Convex backend
 (`convex dev` — watches for function changes and pushes to your dev deployment)
 and the frontend dev server simultaneously.
+
+---
+
+## Inline Convex Documentation (`docs/`)
+
+The `docs/` directory contains a full copy of the official Convex documentation
+source (from the [convex-backend](https://github.com/get-convex/convex-backend)
+monorepo). This makes the repo a **self-contained reference** — Claude Code can
+read both working demo code and authoritative docs without leaving the repo or
+fetching URLs at runtime.
+
+### What's in `docs/`
+
+The copy mirrors
+[`npm-packages/docs`](https://github.com/get-convex/convex-backend/tree/main/npm-packages/docs)
+from the upstream repo. Key content lives in `docs/docs/`:
+
+| Path | Covers |
+|------|--------|
+| `docs/docs/functions/` | Queries, mutations, actions, internal functions, HTTP actions |
+| `docs/docs/database/` | Tables, schemas, indexes, document IDs, data types |
+| `docs/docs/auth/` | Authentication setup, Clerk, Auth0, custom providers |
+| `docs/docs/client/` | React hooks, ConvexProvider, optimistic updates |
+| `docs/docs/file-storage/` | Upload, download, serving files |
+| `docs/docs/search/` | Full-text search indexes |
+| `docs/docs/scheduling/` | Cron jobs, scheduled functions |
+| `docs/docs/ai/` | AI/LLM integration patterns |
+| `docs/docs/agents/` | AI agent patterns with Convex |
+| `docs/docs/testing/` | Testing Convex functions with vitest |
+| `docs/docs/production/` | Deployment, environment variables, logging |
+| `docs/docs/quickstart/` | Framework-specific quickstart guides |
+| `docs/docs/tutorial/` | Step-by-step tutorial |
+| `docs/docs/components/` | Convex components system |
+
+The directory also includes the Docusaurus site scaffolding (`docusaurus.config.ts`,
+`sidebars.js`, `src/`, `static/`) and config files, but the `.mdx` and `.md`
+files under `docs/docs/` are the primary reference material.
+
+### How this copy was created
+
+A Git sparse checkout was used to pull only the `npm-packages/docs` subtree
+from the upstream repo (commit `e205886`):
+
+```sh
+git clone --depth 1 --filter=blob:none --sparse \
+  https://github.com/get-convex/convex-backend.git /tmp/convex-backend
+cd /tmp/convex-backend
+git sparse-checkout set npm-packages/docs
+cp -r npm-packages/docs <this-repo>/docs
+rm -rf /tmp/convex-backend
+```
+
+### Updating to the latest version
+
+Re-run the same commands to replace `docs/` with the latest upstream content:
+
+```sh
+rm -rf docs
+git clone --depth 1 --filter=blob:none --sparse \
+  https://github.com/get-convex/convex-backend.git /tmp/convex-backend
+cd /tmp/convex-backend
+git sparse-checkout set npm-packages/docs
+cp -r npm-packages/docs "$(dirs -l +1)/docs"
+rm -rf /tmp/convex-backend
+```
+
+This uses `--depth 1` (single commit) and `--filter=blob:none` with sparse
+checkout so only the docs subtree is fetched — not the entire convex-backend
+repo.
