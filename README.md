@@ -306,3 +306,51 @@ rm -rf /tmp/convex-helpers
 ```
 
 This clones only the latest commit (`--depth 1`) so the fetch is fast.
+
+---
+
+## Inline Convex Components (`inlined-components/`)
+
+The `inlined-components/` directory contains full copies of official
+[Convex components](https://convex.dev/components) — self-contained backend
+modules that bundle functions, schemas, and isolated data. This gives Claude
+Code direct access to each component's source, schema, client API, and usage
+examples.
+
+See [`inlined-components/README.md`](inlined-components/README.md) for the
+full directory map, per-component API guides, and sync instructions.
+
+### Components included
+
+| Directory | NPM package | What it does |
+|-----------|-------------|-------------|
+| `inlined-components/stripe/` | `@convex-dev/stripe` | Stripe payments, subscriptions, billing, and webhook sync |
+| `inlined-components/workos-authkit/` | `@convex-dev/workos-authkit` | WorkOS AuthKit user sync, event handlers, and auth actions |
+| `inlined-components/workpool/` | `@convex-dev/workpool` | Async work pools with parallelism limits, retries, and completion callbacks |
+| `inlined-components/rate-limiter/` | `@convex-dev/rate-limiter` | Token bucket and fixed window rate limiting with sharding |
+| `inlined-components/presence/` | `@convex-dev/presence` | Real-time user presence tracking in rooms with heartbeats |
+| `inlined-components/migrations/` | `@convex-dev/migrations` | Stateful, resumable data migrations with batch processing |
+| `inlined-components/aggregate/` | `@convex-dev/aggregate` | O(log n) counts, sums, rankings via B-tree aggregation |
+| `inlined-components/workflow/` | `@convex-dev/workflow` | Durable multi-step workflows with events and nested workflows |
+| `inlined-components/action-retrier/` | `@convex-dev/action-retrier` | Retry idempotent actions with exponential backoff |
+| `inlined-components/crons/` | `@convex-dev/crons` | Dynamic runtime cron job registration and management |
+| `inlined-components/action-cache/` | `@convex-dev/action-cache` | Cache expensive action results with TTL and invalidation |
+| `inlined-components/resend/` | `@convex-dev/resend` | Durable email delivery via Resend with batching and webhooks |
+
+### How these copies were created
+
+Each repo was shallow-cloned (`--depth 1`) and copied in with `.git`, `.github`,
+and lock files removed. The same pattern used for `convex-helpers/`:
+
+```sh
+git clone --depth 1 https://github.com/get-convex/stripe.git /tmp/convex-stripe
+cp -r /tmp/convex-stripe inlined-components/stripe
+rm -rf inlined-components/stripe/.git inlined-components/stripe/.github \
+       inlined-components/stripe/package-lock.json
+rm -rf /tmp/convex-stripe
+```
+
+### Updating to the latest versions
+
+A sync script in `inlined-components/README.md` refreshes all components at
+once. To update a single component, re-run its clone + copy + cleanup commands.

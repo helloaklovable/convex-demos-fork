@@ -1,0 +1,107 @@
+{
+  "name": "@convex-dev/aggregate",
+  "description": "Convex component to calculate counts and sums of values for efficient aggregation.",
+  "version": "0.2.1",
+  "keywords": [
+    "convex",
+    "component",
+    "aggregate",
+    "count",
+    "sum"
+  ],
+  "homepage": "https://github.com/get-convex/aggregate",
+  "repository": "github:get-convex/aggregate",
+  "bugs": "https://github.com/get-convex/aggregate/issues",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "run-p -r 'dev:*'",
+    "dev:backend": "convex dev --typecheck-components",
+    "dev:frontend": "cd example && vite --clearScreen false",
+    "dev:build": "chokidar 'tsconfig*.json' 'src/**/*.ts' -i '**/*.test.ts' -c 'npx convex codegen --component-dir ./src/component && npm run build' --initial",
+    "predev": "path-exists .env.local || (npm run build && npx convex dev --once)",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "build": "tsc --project ./tsconfig.build.json",
+    "typecheck": "tsc --noEmit && tsc -p example && tsc -p example/convex",
+    "lint": "eslint .",
+    "all": "run-p -r 'dev:*' 'test:watch'",
+    "test": "vitest run --typecheck",
+    "test:watch": "vitest --typecheck --clearScreen false",
+    "test:debug": "vitest --inspect-brk --no-file-parallelism",
+    "test:coverage": "vitest run --coverage --coverage.reporter=text",
+    "prepare": "npm run build",
+    "alpha": "npm run clean && npm ci && run-p test lint typecheck && npm version prerelease --preid alpha && npm publish --tag alpha && git push --tags",
+    "release": "npm run clean && npm ci && run-p test lint typecheck && npm version patch && npm publish && git push --tags",
+    "version": "pbcopy <<<$npm_package_version; vim CHANGELOG.md && prettier -w CHANGELOG.md && git add CHANGELOG.md"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/client/index.d.ts",
+      "default": "./dist/client/index.js"
+    },
+    "./test": "./src/test.ts",
+    "./_generated/component.js": {
+      "types": "./dist/component/_generated/component.d.ts"
+    },
+    "./convex.config": {
+      "types": "./dist/component/convex.config.d.ts",
+      "default": "./dist/component/convex.config.js"
+    },
+    "./convex.config.js": {
+      "types": "./dist/component/convex.config.d.ts",
+      "default": "./dist/component/convex.config.js"
+    }
+  },
+  "peerDependencies": {
+    "convex": "^1.24.8"
+  },
+  "devDependencies": {
+    "@convex-dev/migrations": "0.3.1",
+    "@edge-runtime/vm": "5.0.0",
+    "@emotion/react": "11.14.0",
+    "@emotion/styled": "11.14.1",
+    "@eslint/eslintrc": "3.3.3",
+    "@eslint/js": "9.39.1",
+    "@fast-check/vitest": "0.2.3",
+    "@mantine/core": "8.3.9",
+    "@mantine/emotion": "8.3.9",
+    "@mantine/hooks": "8.3.9",
+    "@mantine/notifications": "8.3.9",
+    "@tabler/icons-react": "3.35.0",
+    "@types/node": "20.19.25",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@typescript-eslint/eslint-plugin": "8.48.1",
+    "@typescript-eslint/parser": "8.48.1",
+    "@vitejs/plugin-react": "5.1.1",
+    "@vitest/coverage-v8": "3.2.4",
+    "@xyflow/react": "12.10.0",
+    "chokidar-cli": "3.0.0",
+    "convex": "1.30.0",
+    "convex-helpers": "0.1.106",
+    "convex-test": "0.0.41",
+    "eslint": "9.39.1",
+    "eslint-plugin-react-hooks": "7.0.1",
+    "eslint-plugin-react-refresh": "0.4.24",
+    "globals": "16.5.0",
+    "npm-run-all2": "8.0.4",
+    "path-exists-cli": "2.0.0",
+    "pkg-pr-new": "0.0.62",
+    "prettier": "3.7.4",
+    "rand-seed": "3.0.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "type-route": "1.1.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.48.1",
+    "vite": "7.2.6",
+    "vitest": "3.2.4"
+  },
+  "types": "./dist/client/index.d.ts",
+  "module": "./dist/client/index.js"
+}
