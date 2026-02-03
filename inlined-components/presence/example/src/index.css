@@ -1,0 +1,11 @@
+main {
+  padding: 2em;
+  width: min(800px, 95vw);
+  margin: 0 auto;
+  text-align: center;
+}
+
+/* Custom style when online and typing */
+.avatar.online[data-presence-isTyping="true"] {
+  border: 2px solid #00f;
+}

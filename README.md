@@ -327,6 +327,15 @@ full directory map, per-component API guides, and sync instructions.
 | `inlined-components/stripe/` | `@convex-dev/stripe` | Stripe payments, subscriptions, billing, and webhook sync |
 | `inlined-components/workos-authkit/` | `@convex-dev/workos-authkit` | WorkOS AuthKit user sync, event handlers, and auth actions |
 | `inlined-components/workpool/` | `@convex-dev/workpool` | Async work pools with parallelism limits, retries, and completion callbacks |
+| `inlined-components/rate-limiter/` | `@convex-dev/rate-limiter` | Token bucket and fixed window rate limiting with sharding |
+| `inlined-components/presence/` | `@convex-dev/presence` | Real-time user presence tracking in rooms with heartbeats |
+| `inlined-components/migrations/` | `@convex-dev/migrations` | Stateful, resumable data migrations with batch processing |
+| `inlined-components/aggregate/` | `@convex-dev/aggregate` | O(log n) counts, sums, rankings via B-tree aggregation |
+| `inlined-components/workflow/` | `@convex-dev/workflow` | Durable multi-step workflows with events and nested workflows |
+| `inlined-components/action-retrier/` | `@convex-dev/action-retrier` | Retry idempotent actions with exponential backoff |
+| `inlined-components/crons/` | `@convex-dev/crons` | Dynamic runtime cron job registration and management |
+| `inlined-components/action-cache/` | `@convex-dev/action-cache` | Cache expensive action results with TTL and invalidation |
+| `inlined-components/resend/` | `@convex-dev/resend` | Durable email delivery via Resend with batching and webhooks |
 
 ### How these copies were created
 
